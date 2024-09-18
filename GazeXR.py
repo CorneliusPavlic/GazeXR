@@ -7,17 +7,18 @@ from utils.csvReader import read as csvRead
 import cv2
 import os
 import json
+import shutil
 import copy
 import ffmpeg
 import csv
 import itertools
-
+import torch
 
 # Load model and run inference on the video
 def run_detection(video, progress=None):
-    model = YOLO("yolov9e.pt")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = YOLO("yolov9e.pt").to(device)
     cap = cv2.VideoCapture(video)
-
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)  # Keep FPS as float for more accurate timing
@@ -77,9 +78,13 @@ def run_detection(video, progress=None):
     rotated_frame = rotate_image(first_frame, rotate_amount)
 
     # Create a folder for saving rotated video
-    output_folder = 'rotated_output'
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+    output_folder = f"rotated_{video.split('/')[-1].split('.')[0]}"
+    counter = 1
+    while os.path.exists(output_folder):
+        output_folder = f"{output_folder}({counter})"
+        counter += 1
+    # Create the unique directory
+    os.makedirs(output_folder, exist_ok=True)
 
     output_path = os.path.join(output_folder, 'rotated_video.mp4')
 
@@ -113,7 +118,7 @@ def run_detection(video, progress=None):
     if progress is not None:
         results = []
         frames_processed = 0
-        for result in model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4):
+        for result in model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device):
             results.append(result.boxes)
             frames_processed += 1
 
@@ -121,7 +126,7 @@ def run_detection(video, progress=None):
             progress_percentage = int(((num_frames + frames_processed) / (num_frames * 2)) * 70)  # Second phase progress
             progress.emit(progress_percentage)
     else: 
-        results = model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4)
+        results = model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device)
         results = [result.boxes for result in results]
     return output_path, results, rotate_amount
 
@@ -368,7 +373,7 @@ def calculate_wrapped_distance(box1, box2, screen_width):
     
     return np.sqrt(dx**2 + dy**2)
 
-def check_for_box_jumping_to_edges(box, box2, frame_left_margin, frame_right_margin):
+def check_for_box_jumping_to_edges(box, box2, frame_left_margin, frame_right_margin, frame_width):
     if box["box"][0] < frame_left_margin and box2["box"][0] < frame_width / 2:
         return False
     if box["box"][0] > frame_right_margin and box2["box"][0] > frame_width / 2:
@@ -417,7 +422,7 @@ def reID(input_path, results, rotate_amount, progress):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'XVID' can also be used for .avi files
     out = cv2.VideoWriter('result.mp4', fourcc, fps, (frame_width, frame_height))
 
-    id_for_box = 0
+    id_for_box = 1
     current_boxes = []
     boxes_for_gaze = []
 
@@ -497,7 +502,7 @@ def reID(input_path, results, rotate_amount, progress):
                             if distance < min_distance:
                                 min_distance = distance
                                 closest_box_index = idx
-                    if closest_box_index is not None and min_distance < 400 and check_for_box_jumping_to_edges(box, current_boxes[closest_box_index], frame_left_margin, frame_right_margin):
+                    if closest_box_index is not None and min_distance < 400 and check_for_box_jumping_to_edges(box, current_boxes[closest_box_index], frame_left_margin, frame_right_margin, frame_width):
                         box["id"] = current_boxes[closest_box_index]["id"]
                         box["largestOverlap"] = 0
                         box["decay"] = 0
@@ -512,8 +517,8 @@ def reID(input_path, results, rotate_amount, progress):
             current_box_frame = []
             for box in current_boxes:
                 current_box_frame.append(box)
-                cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
-                draw_box(frames_cv2, box)
+                # cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+                # draw_box(frames_cv2, box)
 
             boxes_for_gaze.append(current_box_frame)
             out.write(frames_cv2)
@@ -530,7 +535,9 @@ def reID(input_path, results, rotate_amount, progress):
 
     with open(f"bounding_boxes_{video_name}.json", 'w') as file:
         json.dump(dump_boxes_with_rotate, file, indent=4)
-
+    parent = os.path.dirname(input_path)
+    if os.path.exists(parent):
+        shutil.rmtree(parent)
     # Return the JSON file path and the video path
     return f"bounding_boxes_{video_name}.json", "result.mp4"
 

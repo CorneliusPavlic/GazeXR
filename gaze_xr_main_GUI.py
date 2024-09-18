@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QIcon
 from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QWaitCondition, QMutex
 from GazeXR import (
     run_detection,
     reID,
@@ -24,30 +25,51 @@ from GazeXR import (
 )
 from PyQt6.QtCore import QThread, pyqtSignal
 from generateGraphFunctions import (generate_graph_popup, generate_IDs, generate_bounding_boxes, help_box)
-from swapBoundingBoxes import VideoAnnotator
-
+from video_annotator import VideoAnnotator
 class Worker(QThread):
     progress = pyqtSignal(int)  # Signal to emit progress updates
     finished = pyqtSignal(str)  # Signal to emit when the task is complete
     error = pyqtSignal(str)  # Signal to emit errors
-
+    show_video = pyqtSignal(str, str)
+    
     def __init__(self, task, *args, **kwargs):
         super().__init__()
         self.task = task  # The task (function) to be executed
         self.args = args  # Positional arguments for the task
         self.kwargs = kwargs  # Keyword arguments for the task
+        self.paused = False  # Flag to handle the pause state
+        self._pause_condition = QWaitCondition()  # Condition for pausing
+        self._mutex = QMutex()  # Mutex for thread safety
 
     def run(self):
         """Run the provided task in a separate thread."""
         try:
-            result = self.task(self.progress, *self.args, **self.kwargs)  # Execute the task
+            result = self.task(self.progress, self.show_video, self, *self.args, **self.kwargs)
             self.finished.emit(result)   # Emit finished signal when done
         except Exception as e:
             self.error.emit(str(e))  # Emit error signal if an exception occurs
 
+    def pause(self):
+        """Pause the thread execution."""
+        self._mutex.lock()
+        self.paused = True
+        self._mutex.unlock()
+
+    def resume_from_video(self):
+        self._mutex.lock()
+        self._pause_condition.wakeAll()
+        self._mutex.unlock()
+
+    def check_pause(self):
+        """Method to periodically check if the thread is paused and wait if it is."""
+        self._mutex.lock()
+        while self.paused:
+            self._pause_condition.wait(self._mutex)
+        self._mutex.unlock()
+
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
-
+        self.queue = []
         self.video_path = ""
         self.gaze_path = ""
         self.json_path = ""
@@ -427,6 +449,35 @@ class Ui_MainWindow(object):
         self.draw_boxes.setObjectName("draw_boxes")
         self.draw_boxes.clicked.connect(lambda: self.show_popup(generate_bounding_boxes))
         self.verticalLayout.addWidget(self.draw_boxes)
+        
+        self.clear_queue_button = QtWidgets.QPushButton(parent=self.centralwidget)
+        self.clear_queue_button.setMaximumSize(QtCore.QSize(171, 16777215))
+        self.clear_queue_button.setStyleSheet(
+            ".QPushButton {\n"
+            "    font-family: serif;\n"
+            "    color: #fff;\n"
+            "    background-color: #222;\n"
+            "    border: .1em solid #222;\n"
+            "    text-transform: lowercase;\n"
+            "    padding: .5em 1em;\n"
+            "    border-radius: 5px;\n"
+            "    font-style: italic;\n"
+            "    transition: all .5s ease;\n"
+            "    cursor: pointer;\n"
+            "    font-size: 2rem;\n"
+            "}\n"
+            "\n"
+            ".QPushButton:hover {\n"
+            "    color: #222;\n"
+            "    background: #fff;\n"
+            "}")
+        self.clear_queue_button.setObjectName("clear_queue_button")
+        self.clear_queue_button.setText("Clear Queue")
+        self.clear_queue_button.setEnabled(False)
+        self.clear_queue_button.clicked.connect(self.clear_queue)
+        self.verticalLayout.addWidget(self.clear_queue_button)
+        
+
         self.gridLayout.addLayout(self.verticalLayout, 1, 1, 1, 1)
         self.graph_image = QtWidgets.QLabel(parent=self.centralwidget)
         self.graph_image.setMaximumSize(QtCore.QSize(690, 480))
@@ -510,14 +561,39 @@ class Ui_MainWindow(object):
 
         # Show the popup dialog
         self.dialog.exec()  # This will block execution until the dialog is closed
+        self.add_task()
         
-        if self.button == "generate_graph":
-                self.start_graph_task(self.json_path, self.video_path, self.gaze_path)
-        elif self.button == "extract_id":
-                id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
-                self.start_id_extraction(self.json_path, self.video_path, self.gaze_path, id_)
-        elif self.button == "bounding_boxes":
-                self.start_bounding_task(self.json_path, self.video_path)
+    
+    def add_task(self):
+        id_ = -1
+        if self.button == 'extract_id':
+            id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
+        queue_item = {
+                "json_path": self.json_path,
+                "video_path": self.video_path,
+                "gaze_path": self.gaze_path,
+                "button": self.button, 
+                "id": id_,
+            }
+        self.json_path = ''
+        self.video_path = ''
+        self.gaze_path = ''
+        self.button = ''
+        if(self.queue != []):
+            self.queue.append(queue_item)
+            self.clear_queue_button.setEnabled(True)
+        else:
+            self.start_task(queue_item)
+            
+
+    def start_task(self, queue_item):
+            if queue_item["button"] == "generate_graph":
+                    self.start_graph_task(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"])
+            elif queue_item["button"] == "extract_id":
+                    id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
+                    self.start_id_extraction(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"], queue_item["id_"])
+            elif queue_item["button"] == "bounding_boxes":
+                    self.start_bounding_task(queue_item["json_path"], queue_item["video_path"])
                 
     def receive_data(self, data):
         """Receive data from the popup window and set the paths."""
@@ -537,6 +613,7 @@ class Ui_MainWindow(object):
         self.worker = Worker(extract_function, json_path, video_path, gaze_path, id_)
 
         # Connect the worker signals to your methods
+        self.worker.show_video.connect(self.show_video)
         self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
         self.worker.finished.connect(self.on_id_completed)  # Handle when the task is done
         self.worker.error.connect(self.on_graph_error)  # Handle errors
@@ -549,6 +626,7 @@ class Ui_MainWindow(object):
         self.worker = Worker(bounding_function, json_path, video_path)
 
         # Connect the worker signals to your methods
+        self.worker.show_video.connect(self.show_video)
         self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
         self.worker.finished.connect(self.on_id_completed)  # Handle when the task is done
         self.worker.error.connect(self.on_graph_error)  # Handle errors
@@ -562,6 +640,7 @@ class Ui_MainWindow(object):
         self.worker = Worker(graph_function, json_path, video_path, gaze_path)
 
         # Connect the worker signals to your methods
+        self.worker.show_video.connect(self.show_video)
         self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
         self.worker.finished.connect(self.on_graph_completed)  # Handle when the task is done
         self.worker.error.connect(self.on_graph_error)  # Handle errors
@@ -573,6 +652,10 @@ class Ui_MainWindow(object):
         self.progress_bar.setProperty("value", 0)
         self.progress_label.setText("Progress: {}%".format(0))
         self.button = ''
+        if self.queue != []:
+            self.start_task(self.queue.pop(0))
+        else:
+            self.clear_queue_button.setEnabled(False)
         # Update the UI with the result (e.g., show a message or display the graph)
     def update_progress(self, value):
         """Update a progress bar based on progress emitted by the worker."""
@@ -585,17 +668,35 @@ class Ui_MainWindow(object):
         self.progress_bar.setProperty("value", 0)
         self.progress_label.setText("Progress: {}%".format(0))
         self.graph_image.setPixmap(QtGui.QPixmap(value))
+        if self.queue != []:
+            self.start_task(self.queue.pop(0))
+        else:
+            self.clear_queue_button.setEnabled(False)
         # Update the UI with the result (e.g., show a message or display the graph)
 
     def on_graph_error(self, error_message):
         """Handle errors raised during the execution."""
         print(f"Error: {error_message}")
 
+    def show_video(self, video_path, bbox_file_path):
+        # Create and show your video window with the provided paths
+        video_annotator = VideoAnnotator(video_path, bbox_file_path)
+        video_annotator.show()
+
+        # Connect the close event of the video window to resume the worker thread
+        video_annotator.closed.connect(self.worker.resume_from_video)
+        
+    def clear_queue(self):
+        self.queue = []
+        self.clear_queue_button.setEnabled(False)
+        
 
 def bounding_function(progress, json_path, video_path):
         if json_path == '':
             output_path, results, rotate_amount = run_detection(video_path, progress)
             json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
+            video_annotator = VideoAnnotator(processed_video_path, json_file)
+            video_annotator.show()  # Launch VideoAnnotator in a separate window
         else:
             progress.emit(50)
             draw_boxes_from_pkl(json_path, video_path)
@@ -603,10 +704,14 @@ def bounding_function(progress, json_path, video_path):
             
         
 
-def extract_function(progress, json_path, video_path, gaze_path, id_):
+def extract_function(progress,show_video_signal, worker, json_path, video_path, gaze_path, id_):
         if json_path == '':
             output_path, results, rotate_amount = run_detection(video_path, progress)
             json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
+            show_video_signal.emit(processed_video_path, json_file)
+            worker._mutex.lock()
+            worker._pause_condition.wait(worker._mutex)
+            worker._mutex.unlock()
             plot = initialize_plot_data(json_file, gaze_path)
             generate_compilation_from_frames(processed_video_path, plot.data, id_)
         else:
@@ -616,10 +721,14 @@ def extract_function(progress, json_path, video_path, gaze_path, id_):
             generate_compilation_from_frames(video_path, plot.data, id_)
             progress.emit(99)
         
-def graph_function(progress, json_path, video_path, gaze_path):
+def graph_function(progress, show_video_signal,worker, json_path, video_path, gaze_path):
         if json_path == '':
                 output_path, results, rotate_amount = run_detection(video_path, progress)
                 json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
+                show_video_signal.emit(processed_video_path, json_file)
+                worker._mutex.lock()
+                worker._pause_condition.wait(worker._mutex)
+                worker._mutex.unlock()
                 plot = initialize_plot_data(json_file, gaze_path)
                 graph_path = generate_graph(plot)
                 return graph_path
