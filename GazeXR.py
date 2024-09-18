@@ -80,13 +80,15 @@ def run_detection(video, progress=None):
     # Create a folder for saving rotated video
     output_folder = f"rotated_{video.split('/')[-1].split('.')[0]}"
     counter = 1
-    while os.path.exists(output_folder):
-        output_folder = f"{output_folder}({counter})"
-        counter += 1
-    # Create the unique directory
-    os.makedirs(output_folder, exist_ok=True)
+    unique_output_folder = output_folder  # Store the base folder name
 
-    output_path = os.path.join(output_folder, 'rotated_video.mp4')
+    while os.path.exists(unique_output_folder):
+        unique_output_folder = f"{output_folder}({counter})"
+        counter += 1
+
+    # Create the unique directory
+    os.makedirs(unique_output_folder, exist_ok=True)
+    output_path = os.path.join(unique_output_folder, 'rotated_video.mp4')
 
     # Save the rotated frames to the video
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use 'mp4v' codec for mp4 files
@@ -422,7 +424,7 @@ def reID(input_path, results, rotate_amount, progress):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'XVID' can also be used for .avi files
     out = cv2.VideoWriter('result.mp4', fourcc, fps, (frame_width, frame_height))
 
-    id_for_box = 1
+    id_for_box = 0
     current_boxes = []
     boxes_for_gaze = []
 
@@ -516,7 +518,9 @@ def reID(input_path, results, rotate_amount, progress):
 
             current_box_frame = []
             for box in current_boxes:
-                current_box_frame.append(box)
+                append_box = copy.deepcopy(box)
+                append_box["id"] += 1
+                current_box_frame.append(append_box)
                 # cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
                 # draw_box(frames_cv2, box)
 
@@ -526,20 +530,21 @@ def reID(input_path, results, rotate_amount, progress):
         cap.release()
         out.release()
 
-    video_name = input_path.split('/')[-1].split('.')[0]
+    unique_output_folder = os.path.dirname(input_path)
+    folder_name = os.path.basename(unique_output_folder) 
     dump_boxes_with_rotate = {
         "boxes": boxes_for_gaze,
         "rotate_amount": rotate_amount
     }
     dump_boxes_with_rotate = convert_to_serializable(dump_boxes_with_rotate)
 
-    with open(f"bounding_boxes_{video_name}.json", 'w') as file:
+    with open(f"bounding_boxes_{folder_name}.json", 'w') as file:
         json.dump(dump_boxes_with_rotate, file, indent=4)
-    parent = os.path.dirname(input_path)
-    if os.path.exists(parent):
-        shutil.rmtree(parent)
+        
+    if os.path.exists(unique_output_folder):
+        shutil.rmtree(unique_output_folder)
     # Return the JSON file path and the video path
-    return f"bounding_boxes_{video_name}.json", "result.mp4"
+    return f"bounding_boxes_{folder_name}.json", "result.mp4"
 
 
 def convert_to_serializable(data):

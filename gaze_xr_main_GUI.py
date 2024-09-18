@@ -26,6 +26,7 @@ from GazeXR import (
 from PyQt6.QtCore import QThread, pyqtSignal
 from generateGraphFunctions import (generate_graph_popup, generate_IDs, generate_bounding_boxes, help_box)
 from video_annotator import VideoAnnotator
+import os
 class Worker(QThread):
     progress = pyqtSignal(int)  # Signal to emit progress updates
     finished = pyqtSignal(str)  # Signal to emit when the task is complete
@@ -488,15 +489,8 @@ class Ui_MainWindow(object):
         self.graph_image.setScaledContents(True)
         self.graph_image.setObjectName("graph_image")
         self.gridLayout.addWidget(self.graph_image, 1, 0, 1, 1)
-        self.progress_bar = QtWidgets.QProgressBar(parent=self.centralwidget)
-        self.progress_bar.setEnabled(True)
-        self.progress_bar.setLayoutDirection(QtCore.Qt.LayoutDirection.LeftToRight)
-        self.progress_bar.setProperty("value", 0)
-        self.progress_bar.setObjectName("progress_bar")
-        self.gridLayout.addWidget(self.progress_bar, 4, 0, 1, 1)
-        self.progress_label = QtWidgets.QLabel(parent=self.centralwidget)
-        self.progress_label.setObjectName("progress_label")
-        self.gridLayout.addWidget(self.progress_label, 4, 1, 1, 1)
+        self.progress_container = QtWidgets.QVBoxLayout()
+        self.gridLayout.addLayout(self.progress_container, 4, 0, 1, 2)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setContentsMargins(-1, -1, 150, -1)
         self.horizontalLayout.setObjectName("horizontalLayout")
@@ -544,9 +538,6 @@ class Ui_MainWindow(object):
             )
         )
         self.draw_boxes.setText(_translate("MainWindow", "See Bounding Boxes"))
-        self.progress_label.setText(
-            _translate("MainWindow", "Progress: 0% (estimated time: 0:00)")
-        )
         self.help_icon.setText(_translate("MainWindow", "?"))
 
     def show_popup(self, function):
@@ -587,13 +578,32 @@ class Ui_MainWindow(object):
             
 
     def start_task(self, queue_item):
-            if queue_item["button"] == "generate_graph":
-                    self.start_graph_task(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"])
-            elif queue_item["button"] == "extract_id":
-                    id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
-                    self.start_id_extraction(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"], queue_item["id_"])
-            elif queue_item["button"] == "bounding_boxes":
-                    self.start_bounding_task(queue_item["json_path"], queue_item["video_path"])
+        # Create a QWidget to hold the progress bar and label together
+        task_widget = QtWidgets.QWidget()
+        task_layout = QtWidgets.QVBoxLayout(task_widget)  # Use QVBoxLayout for label + progress bar
+        
+        # Create a label for displaying the task's video path and progress percentage
+        filename = os.path.basename(queue_item["video_path"])
+        task_label = QtWidgets.QLabel()
+        task_label.setText(f"Task: {filename} - Progress: 0%")
+        task_layout.addWidget(task_label)
+
+        # Create a new progress bar for this task
+        progress_bar = QtWidgets.QProgressBar()
+        progress_bar.setLayoutDirection(QtCore.Qt.LayoutDirection.LeftToRight)
+        progress_bar.setProperty("value", 0)
+        task_layout.addWidget(progress_bar)
+
+        # Add the task widget (containing label and progress bar) to the layout
+        self.progress_container.addWidget(task_widget)
+    
+        if queue_item["button"] == "generate_graph":
+                self.start_graph_task(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"], progress_bar, task_label)
+        elif queue_item["button"] == "extract_id":
+                id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
+                self.start_id_extraction(queue_item["json_path"], queue_item["video_path"], queue_item["gaze_path"], queue_item["id_"], progress_bar, task_label)
+        elif queue_item["button"] == "bounding_boxes":
+                self.start_bounding_task(queue_item["json_path"], queue_item["video_path"], progress_bar, task_label)
                 
     def receive_data(self, data):
         """Receive data from the popup window and set the paths."""
@@ -608,66 +618,73 @@ class Ui_MainWindow(object):
         # Update the label with the received paths
 
 
-    def start_id_extraction(self, json_path, video_path, gaze_path, id_):
+    def start_id_extraction(self, json_path, video_path, gaze_path, id_, progress_bar, task_label):
         # Create the worker instance
         self.worker = Worker(extract_function, json_path, video_path, gaze_path, id_)
 
         # Connect the worker signals to your methods
         self.worker.show_video.connect(self.show_video)
-        self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
-        self.worker.finished.connect(self.on_id_completed)  # Handle when the task is done
-        self.worker.error.connect(self.on_graph_error)  # Handle errors
+        self.worker.progress.connect(lambda value: self.update_progress(progress_bar, task_label, value))  # Pass the progress bar and label
+        self.worker.finished.connect(lambda result: self.on_id_completed(progress_bar, task_label, result))  # Handle when the task is done
+        self.worker.error.connect(self.on_task_error)  # Handle errors
 
         # Start the worker thread
         self.worker.start()
         
-    def start_bounding_task(self, json_path, video_path):
+    def start_bounding_task(self, json_path, video_path, progress_bar,task_label):
         # Create the worker instance
         self.worker = Worker(bounding_function, json_path, video_path)
 
         # Connect the worker signals to your methods
         self.worker.show_video.connect(self.show_video)
-        self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
-        self.worker.finished.connect(self.on_id_completed)  # Handle when the task is done
-        self.worker.error.connect(self.on_graph_error)  # Handle errors
+        self.worker.progress.connect(lambda value: self.update_progress(progress_bar, task_label, value))  # Pass the progress bar and label
+        self.worker.finished.connect(lambda result: self.on_id_completed(progress_bar, task_label, result))  # Handle when the task is done
+        self.worker.error.connect(self.on_task_error)  # Handle errors
 
         # Start the worker thread
         self.worker.start()
         
         
-    def start_graph_task(self, json_path, video_path, gaze_path):
+    def start_graph_task(self, json_path, video_path, gaze_path, progress_bar, task_label):
         # Create the worker instance
         self.worker = Worker(graph_function, json_path, video_path, gaze_path)
 
         # Connect the worker signals to your methods
         self.worker.show_video.connect(self.show_video)
-        self.worker.progress.connect(self.update_progress)  # To update a progress bar or similar
-        self.worker.finished.connect(self.on_graph_completed)  # Handle when the task is done
+        self.worker.progress.connect(lambda value: self.update_progress(progress_bar, task_label, value))  # Pass the progress bar and label
+        self.worker.finished.connect(lambda result: self.on_graph_completed(progress_bar, task_label, result))  # Handle when the task is done
         self.worker.error.connect(self.on_graph_error)  # Handle errors
 
         # Start the worker thread
         self.worker.start()
 
-    def on_id_completed(self, value):
-        self.progress_bar.setProperty("value", 0)
-        self.progress_label.setText("Progress: {}%".format(0))
+    def on_id_completed(self, progress_bar, task_label, value):
         self.button = ''
+        # Get the parent widget that contains both the progress bar and label
+        task_widget = progress_bar.parentWidget()
+        # Remove the widget from the layout
+        self.progress_container.removeWidget(task_widget)
+        task_widget.deleteLater()  # Delete the widget (which contains the progress bar and label)
+
         if self.queue != []:
             self.start_task(self.queue.pop(0))
         else:
             self.clear_queue_button.setEnabled(False)
         # Update the UI with the result (e.g., show a message or display the graph)
-    def update_progress(self, value):
+    def update_progress(self, progress_bar, task_label, value):
         """Update a progress bar based on progress emitted by the worker."""
-        self.progress_bar.setProperty("value", value)
-        self.progress_label.setText("Progress: {}%".format(value))
+        progress_bar.setProperty("value", value)
+        task_label.setText(f"{task_label.text().split('-')[0]}- Progress: {value}%")
         # You can update a progress bar widget here, e.g., self.progressBar.setValue(value)
 
-    def on_graph_completed(self, value):
-        self.button = ''
-        self.progress_bar.setProperty("value", 0)
-        self.progress_label.setText("Progress: {}%".format(0))
+    def on_graph_completed(self, progress_bar, task_label, value):
         self.graph_image.setPixmap(QtGui.QPixmap(value))
+        task_widget = progress_bar.parentWidget()
+
+        # Remove the widget from the layout
+        self.progress_container.removeWidget(task_widget)
+        task_widget.deleteLater()  # Delete the widget (which contains the progress bar and label)
+
         if self.queue != []:
             self.start_task(self.queue.pop(0))
         else:
@@ -708,7 +725,7 @@ def extract_function(progress,show_video_signal, worker, json_path, video_path, 
         if json_path == '':
             output_path, results, rotate_amount = run_detection(video_path, progress)
             json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
-            show_video_signal.emit(processed_video_path, json_file)
+            show_video_signal.emit(video_path, json_file)
             worker._mutex.lock()
             worker._pause_condition.wait(worker._mutex)
             worker._mutex.unlock()
@@ -725,7 +742,7 @@ def graph_function(progress, show_video_signal,worker, json_path, video_path, ga
         if json_path == '':
                 output_path, results, rotate_amount = run_detection(video_path, progress)
                 json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
-                show_video_signal.emit(processed_video_path, json_file)
+                show_video_signal.emit(video_path, json_file)
                 worker._mutex.lock()
                 worker._pause_condition.wait(worker._mutex)
                 worker._mutex.unlock()
