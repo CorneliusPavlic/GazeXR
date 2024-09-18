@@ -123,7 +123,7 @@ class VideoAnnotator(QMainWindow):
         # Detect which bounding box was clicked
         for i, bbox_dict in enumerate(self.bboxes[self.current_frame]):
             x, y, w, h = bbox_dict["box"]
-            x += self.rotate_amount  # Account for any rotation
+            x = ((x - self.rotate_amount) % self.original_width)
             if x <= x_click <= x + w and y <= y_click <= y + h:
                 self.selected_bboxes.append((self.current_frame, i))  # Store the clicked bounding box
 

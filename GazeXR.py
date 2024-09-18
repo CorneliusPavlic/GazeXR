@@ -182,7 +182,7 @@ class Graph:
         
         # Redraw the plot to update it
         self.fig.canvas.draw()
-    def dump_to_csv(self, filename='gaze_points.csv'):
+    def dump_to_csv(self, filename='gaze_points'):
         # Check if the file already exists, if so, append an ID
         base_filename, file_extension = os.path.splitext(filename)
         counter = itertools.count(1)
@@ -192,7 +192,7 @@ class Graph:
             filename = f"{base_filename}_{next(counter)}{file_extension}"
         
         # Open the file in write mode
-        with open(filename, mode='w', newline='') as file:
+        with open(f"{filename}.csv", mode='w', newline='') as file:
             # Create a CSV writer object
             writer = csv.writer(file)
             
@@ -203,7 +203,7 @@ class Graph:
             writer.writerows(self.data)
         
     def save(self, path='gaze_points.png'):
-        self.fig.canvas.draw()
+        self.fig.canvas.draw() 
         plt.pause(0.01)
         self.fig.savefig(path)
         return path
@@ -319,7 +319,7 @@ def calculate_overlap(box1, box2, screen_width, overlap_margin=50, percentage=No
 
 
 
-def draw_box(frame, box, thickness=2, color=(0,255,0)):
+def draw_box(frame, box, thickness=3, color=(0,255,0)):
     x, y, w, h = box["box"]
     x = int(x)
     y = int(y)
@@ -409,7 +409,8 @@ def reID(input_path, results, rotate_amount, progress):
         if len(list_of_boxes_with_ID) > num_of_people:
             num_of_people = len(list_of_boxes_with_ID)
             longest_list_of_boxes_with_ID = list_of_boxes_with_ID
-
+    unique_output_folder = os.path.dirname(input_path)
+    folder_name = os.path.basename(unique_output_folder) 
     cap = cv2.VideoCapture(input_path)
 
     # Get video properties
@@ -422,7 +423,7 @@ def reID(input_path, results, rotate_amount, progress):
 
     # Define the codec and create VideoWriter object
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'XVID' can also be used for .avi files
-    out = cv2.VideoWriter('result.mp4', fourcc, fps, (frame_width, frame_height))
+    out = cv2.VideoWriter(f"results_{folder_name}.mp4", fourcc, fps, (frame_width, frame_height))
 
     id_for_box = 0
     current_boxes = []
@@ -521,8 +522,8 @@ def reID(input_path, results, rotate_amount, progress):
                 append_box = copy.deepcopy(box)
                 append_box["id"] += 1
                 current_box_frame.append(append_box)
-                # cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
-                # draw_box(frames_cv2, box)
+                cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+                draw_box(frames_cv2, box)
 
             boxes_for_gaze.append(current_box_frame)
             out.write(frames_cv2)
@@ -530,8 +531,7 @@ def reID(input_path, results, rotate_amount, progress):
         cap.release()
         out.release()
 
-    unique_output_folder = os.path.dirname(input_path)
-    folder_name = os.path.basename(unique_output_folder) 
+
     dump_boxes_with_rotate = {
         "boxes": boxes_for_gaze,
         "rotate_amount": rotate_amount
@@ -544,7 +544,7 @@ def reID(input_path, results, rotate_amount, progress):
     if os.path.exists(unique_output_folder):
         shutil.rmtree(unique_output_folder)
     # Return the JSON file path and the video path
-    return f"bounding_boxes_{folder_name}.json", "result.mp4"
+    return f"bounding_boxes_{folder_name}.json", f"results_{folder_name}.mp4"
 
 
 def convert_to_serializable(data):
@@ -703,6 +703,6 @@ def draw_boxes_from_pkl(json_path, video_path):
     
 def generate_graph(plot, path='gaze_points.png'):
     plot.sort_and_plot()
-    plot.dump_to_csv()
+    plot.dump_to_csv(path)
     plot.save(path)
     return path

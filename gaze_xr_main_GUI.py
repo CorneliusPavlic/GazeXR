@@ -747,13 +747,13 @@ def graph_function(progress, show_video_signal,worker, json_path, video_path, ga
                 worker._pause_condition.wait(worker._mutex)
                 worker._mutex.unlock()
                 plot = initialize_plot_data(json_file, gaze_path)
-                graph_path = generate_graph(plot)
+                graph_path = generate_graph(plot, os.path.splitext(os.path.basename(video_path))[0])
                 return graph_path
         else:
                 progress.emit(10)
                 plot = initialize_plot_data(json_path, gaze_path)
                 progress.emit(80)
-                graph_path = generate_graph(plot)
+                graph_path = generate_graph(plot, os.path.splitext(json_path.replace("bounding_boxes_rotated_", ""))[0])
                 progress.emit(99)
                 return graph_path
         
