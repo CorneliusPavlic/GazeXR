@@ -87,6 +87,8 @@ class generate_graph_popup(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'gaze_path': self.gaze_path, 'button': 'generate_graph'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
     def generate_graph_json_clicked(self, parent):
         """Open file dialogs to select video and JSON files."""
         self.json_path, _ = QFileDialog.getOpenFileName(self, "Select JSON File", "", "JSON files (*.json)")
@@ -95,6 +97,8 @@ class generate_graph_popup(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'gaze_path': self.gaze_path, 'json_path': self.json_path, 'button': 'generate_graph'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
 
 
 class generate_IDs(QDialog):
@@ -180,6 +184,8 @@ class generate_IDs(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'gaze_path' : self.gaze_path, 'button': 'extract_id'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
             
     def on_extract_id_json_clicked(self, parent):
         """Open file dialogs to select video and JSON files."""
@@ -190,6 +196,8 @@ class generate_IDs(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'gaze_path' : self.gaze_path, 'json_path': self.json_path, 'button': 'extract_id'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
 
 
 class generate_bounding_boxes(QDialog):
@@ -273,6 +281,8 @@ class generate_bounding_boxes(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'button': 'bounding_boxes'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
             
     def on_extract_id_json_clicked(self, parent):
         """Open file dialogs to select video and JSON files."""
@@ -282,6 +292,8 @@ class generate_bounding_boxes(QDialog):
             # Emit both file paths as a dictionary
             self.value_signal.emit({'video_path': self.video_path, 'json_path': self.json_path, 'button': 'bounding_boxes'})
             self.accept()
+        else:
+            self.value_signal.emit({'button': 'failed'})
 
 class help_box(QDialog):
     value_signal = pyqtSignal(dict)

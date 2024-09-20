@@ -557,6 +557,8 @@ class Ui_MainWindow(object):
     
     def add_task(self):
         id_ = -1
+        if self.button == 'failed' or self.button == '':  # If the user closed the dialog without clicking a button,
+            return
         if self.button == 'extract_id':
             id_, ok = QInputDialog.getInt(None, "Enter ID", "Please enter a number for the ID:")
         queue_item = {

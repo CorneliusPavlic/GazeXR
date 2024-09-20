@@ -13,7 +13,7 @@ import csv
 import itertools
 import torch
 from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.video.VideoClip import concatenate_videoclips
+from moviepy.editor import concatenate_videoclips
 
 # Load model and run inference on the video
 def run_detection(video, progress=None):
