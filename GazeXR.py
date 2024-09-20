@@ -9,10 +9,11 @@ import os
 import json
 import shutil
 import copy
-import ffmpeg
 import csv
 import itertools
 import torch
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.video.VideoClip import concatenate_videoclips
 
 # Load model and run inference on the video
 def run_detection(video, progress=None):
@@ -563,30 +564,32 @@ def convert_to_serializable(data):
         return data  # Return other types as-is (assumed to be serializable)
     
     
+
+
 def merge_intervals(intervals):
     """
     Merge overlapping intervals.
-    
-    :param intervals: List of tuples representing intervals (start, end).
-    :return: List of merged intervals.
+    :param intervals: List of tuples (start_time, end_time).
+    :return: Merged intervals.
     """
     if not intervals:
         return []
-    
-    # Sort intervals by the start time
+
+    # Sort intervals by start time
     intervals.sort(key=lambda x: x[0])
-    merged_intervals = [intervals[0]]
-
-    for current in intervals[1:]:  # Start from second interval since first is already in merged_intervals
-        last_merged = merged_intervals[-1]
+    
+    merged = [intervals[0]]
+    
+    for current in intervals[1:]:
+        last = merged[-1]
         
-        # If the current interval overlaps with the last merged one, merge them
-        if current[0] <= last_merged[1]:
-            merged_intervals[-1] = (last_merged[0], max(last_merged[1], current[1]))
+        # If intervals overlap, merge them
+        if current[0] <= last[1]:
+            merged[-1] = (last[0], max(last[1], current[1]))
         else:
-            merged_intervals.append(current)
-
-    return merged_intervals
+            merged.append(current)
+    
+    return merged
 
 def generate_compilation_from_frames(video_path, id_times, id_to_extract, leniency=0.5):
     """
@@ -594,7 +597,6 @@ def generate_compilation_from_frames(video_path, id_times, id_to_extract, lenien
 
     :param video_path: Path to the input video file.
     :param id_times: A set of tuples with each tuple containing (time, id).
-    :param output_path: Path where the output video will be saved.
     :param id_to_extract: The ID for which to extract video segments.
     :param leniency: Seconds before and after each frame to include in the clip (default is 0.5 seconds).
     """
@@ -611,46 +613,30 @@ def generate_compilation_from_frames(video_path, id_times, id_to_extract, lenien
     # Merge overlapping intervals
     merged_intervals = merge_intervals(intervals)
 
-    # Temporary file list to store the extracted segments
-    temp_files = []
+    # Load the video file
+    video = VideoFileClip(video_path)
 
-    # Extract each merged segment and save to a temporary file
-    for idx, (start_time, end_time) in enumerate(merged_intervals):
-        temp_file = f'temp_segment_{idx}.mp4'
-        temp_files.append(temp_file)
+    # Extract segments based on merged intervals
+    clips = []
+    for start_time, end_time in merged_intervals:
+        clips.append(video.subclip(start_time, end_time))
+    
+    if not clips:
+        print(f"No valid clips extracted for ID '{id_to_extract}'.")
+        return
 
-        # Use ffmpeg to extract the segment
-        (
-            ffmpeg
-            .input(video_path, ss=start_time, to=end_time)
-            .output(temp_file, c='copy')  # 'copy' codec to avoid re-encoding
-            .run(overwrite_output=True)
-        )
+    # Concatenate the extracted clips into one video
+    final_clip = concatenate_videoclips(clips)
 
-    # Create a list file to concatenate all segments
-    with open('file_list.txt', 'w') as f:
-        for temp_file in temp_files:
-            # Correctly format the file path
-            f.write(f"file '{temp_file}'\n")
+    # Save the compilation video
+    output_path = f"{video_path.rsplit('.', 1)[0]}_{id_to_extract}.mp4"
+    final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
 
-    # Debugging: print out the contents of file_list.txt
-    with open('file_list.txt', 'r') as f:
-        content = f.read()
-
-    # Use ffmpeg to concatenate all segments into one video
-    (
-        ffmpeg
-        .input('file_list.txt', format='concat', safe=0)
-        .output(f"{os.path.splitext(video_path)[0]}_{id_to_extract}{os.path.splitext(video_path)[1]}", c='copy')
-        .run(overwrite_output=True)
-    )
-
-    # Clean up temporary files
-    for temp_file in temp_files:
-        os.remove(temp_file)
-    os.remove('file_list.txt')
-
-    return f"Compilation video saved to {str(id_to_extract) + video_path}"
+    # Cleanup
+    video.close()
+    
+    print(f"Compilation video saved to {output_path}")
+    return output_path
 
 
 def initialize_plot_data(json_path, csv_path): 
