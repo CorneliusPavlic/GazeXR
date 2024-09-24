@@ -710,12 +710,14 @@ class Ui_MainWindow(object):
         self.clear_queue_button.setEnabled(False)
         
 
-def bounding_function(progress, json_path, video_path):
+def bounding_function(progress,show_video_signal, worker, json_path, video_path):
         if json_path == '':
             output_path, results, rotate_amount = run_detection(video_path, progress)
             json_file, processed_video_path = reID(output_path, results, rotate_amount, progress)
-            video_annotator = VideoAnnotator(processed_video_path, json_file)
-            video_annotator.show()  # Launch VideoAnnotator in a separate window
+            show_video_signal.emit(video_path, json_file)
+            worker._mutex.lock()
+            worker._pause_condition.wait(worker._mutex)
+            worker._mutex.unlock()
         else:
             progress.emit(50)
             draw_boxes_from_pkl(json_path, video_path)
@@ -732,12 +734,12 @@ def extract_function(progress,show_video_signal, worker, json_path, video_path, 
             worker._pause_condition.wait(worker._mutex)
             worker._mutex.unlock()
             plot = initialize_plot_data(json_file, gaze_path)
-            generate_compilation_from_frames(processed_video_path, plot.data, id_)
+            generate_compilation_from_frames(processed_video_path, plot.data, id_, gaze_path)
         else:
             progress.emit(10)
             plot = initialize_plot_data(json_path, gaze_path)
             progress.emit(80)
-            generate_compilation_from_frames(video_path, plot.data, id_)
+            generate_compilation_from_frames(video_path, plot.data, id_, gaze_path)
             progress.emit(99)
         
 def graph_function(progress, show_video_signal,worker, json_path, video_path, gaze_path):

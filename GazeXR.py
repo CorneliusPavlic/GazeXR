@@ -103,9 +103,9 @@ def run_detection(video, progress=None):
         if not ret:
             break
         rotated_frame = rotate_image(frame, rotate_amount)
-        
-        progress_percentage = int((i + 1) / (num_frames * 2) * 70)  # *2 because rotation + detection
-        progress.emit(progress_percentage)
+        if progress is not None:
+            progress_percentage = int((i + 1) / (num_frames * 2) * 70)  # *2 because rotation + detection
+            progress.emit(progress_percentage)
         
         out.write(rotated_frame)
 
@@ -385,7 +385,7 @@ def check_for_box_jumping_to_edges(box, box2, frame_left_margin, frame_right_mar
 
 
 
-def reID(input_path, results, rotate_amount, progress):
+def reID(input_path, results, rotate_amount, progress=None):
     box_with_ID = {
         "box": [],
         "id": -1,
@@ -452,8 +452,9 @@ def reID(input_path, results, rotate_amount, progress):
 
             # Update progress during each frame processing
             frames_processed += 1
-            progress_percentage = initial_progress + int((frames_processed / num_frames) * progress_range)
-            progress.emit(progress_percentage)
+            if progress is not None:
+                progress_percentage = initial_progress + int((frames_processed / num_frames) * progress_range)
+                progress.emit(progress_percentage)
 
             for k, box in enumerate(current_boxes):
                 box["decay"] += 1
@@ -692,3 +693,56 @@ def generate_graph(plot, path='gaze_points.png'):
     plot.dump_to_csv(path)
     plot.save(path)
     return path
+
+
+# Function to read the CSV data
+def read_csv_for_drawing(file_path):
+    gaze_data = []
+    with open(file_path, 'r') as file_ob:
+        reader = csv.reader(file_ob)
+        next(reader) # Skip the header
+        for row in reader:
+            session_id, video_frame, coord_x, coord_y = row
+            gaze_data.append({
+            'session_id': session_id,
+            'video_frame': int(video_frame),
+            'coord_x': float(coord_x),
+            'coord_y': float(coord_y)
+            })
+    return gaze_data
+
+# Function to draw gaze points on a video
+def draw_gaze_on_video(video_path, csv_file_path):
+    gaze_data = read_csv_for_drawing(csv_file_path)
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+    # Create an output video with gaze points drawn
+    out = cv2.VideoWriter(f"{video_path.split('.')[0]}_gaze_output.mp4", fourcc, fps, (frame_width, frame_height))
+
+    current_frame = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+    # Get the gaze data for the current frame
+        frame_gaze_data = [gaze for gaze in gaze_data if gaze['video_frame'] == current_frame]
+
+    # Draw gaze points for each frame
+        for gaze in frame_gaze_data:
+            coord_x = int(gaze['coord_x'])
+            coord_y = int(gaze['coord_y'])
+            cv2.circle(frame, (coord_x, coord_y), 10, (0, 0, 255), -1) # Draw red dot for gaze point
+
+            # Write the frame with the gaze point
+        out.write(frame)
+        current_frame += 1
+
+    # Release resources
+    cap.release()
+    out.release()
