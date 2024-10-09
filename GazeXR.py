@@ -18,7 +18,7 @@ from moviepy.editor import concatenate_videoclips
 # Load model and run inference on the video
 def run_detection(video, progress=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = YOLO("yolov9e.pt").to(device)
+    model = YOLO("yolov8x.pt").to(device)
     cap = cv2.VideoCapture(video)
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -26,6 +26,7 @@ def run_detection(video, progress=None):
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Extract the first frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 120)
     ret, first_frame = cap.read()
 
     if not ret:
@@ -34,7 +35,7 @@ def run_detection(video, progress=None):
         return None, None
 
     # Make a prediction on the first frame
-    results_first_frame = model(first_frame, classes=[0], conf=0.225, iou=0.4)
+    results_first_frame = model(first_frame, classes=[0], conf=0.5, iou=0.4, device=device, imgsz=1920)
     boxes_first_frame = results_first_frame[0].boxes
 
     # Extract edges of the bounding boxes
@@ -84,7 +85,7 @@ def run_detection(video, progress=None):
     unique_output_folder = output_folder  # Store the base folder name
 
     while os.path.exists(unique_output_folder):
-        unique_output_folder = f"{output_folder}({counter})"
+        unique_output_folder = f"{output_folder}{counter}"
         counter += 1
 
     # Create the unique directory
@@ -94,7 +95,7 @@ def run_detection(video, progress=None):
     # Save the rotated frames to the video
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use 'mp4v' codec for mp4 files
     out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
-
+    print(output_path)
     out.write(rotated_frame)
 
     # Process the rest of the video with YOLO after rotating
@@ -121,7 +122,7 @@ def run_detection(video, progress=None):
     if progress is not None:
         results = []
         frames_processed = 0
-        for result in model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device):
+        for result in model.predict(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device, imgsz=1920):
             results.append(result.boxes)
             frames_processed += 1
 
@@ -129,8 +130,9 @@ def run_detection(video, progress=None):
             progress_percentage = int(((num_frames + frames_processed) / (num_frames * 2)) * 70)  # Second phase progress
             progress.emit(progress_percentage)
     else: 
-        results = model(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device)
+        results = model.predict(source=output_path, stream=True, exist_ok=True, classes=[0], conf=0.5, iou=0.4, device=device, imgsz=1920)
         results = [result.boxes for result in results]
+
     return output_path, results, rotate_amount
 
 plt.switch_backend('Agg')
@@ -178,7 +180,11 @@ class Graph:
 
         # Re-plot all data points in sorted order
         color = 'C0'  # Color for all points
-        times, boxIDs = zip(*self.data)  # Unzip the sorted data into times and boxIDs
+        try:
+            times, boxIDs = zip(*self.data)  # Unzip the sorted data into times and boxIDs
+        except ValueError as e:
+            print(e)
+            pass
         self.ax.scatter(times, boxIDs, marker='o', c=color, label='Gaze Points')
         
         # Redraw the plot to update it
@@ -238,8 +244,8 @@ def intersect(gazePoint, boundingBoxes, graph, rotate_amount):
 
         #iterate through all gaze point for this frame
         for x, y in zip(gazePoint.x, gazePoint.y):
-            x, y = scale_coords(x, y, (3840, 1920), (5760, 2880))
-            x = (x + rotate_amount) % 3840
+            x = int((float(x) - rotate_amount) % 5760)
+            y = int(float(y))
             #check if gaze point is within bounding box
             if x1 < x and x < x2 and y1 < y and y < y2:
                     graph.update(gazePoint.time, str(box["id"]))
@@ -320,14 +326,17 @@ def calculate_overlap(box1, box2, screen_width, overlap_margin=50, percentage=No
 
 
 
-def draw_box(frame, box, thickness=3, color=(0,255,0)):
+def draw_box(frame, box, frame_width=1, rotation=0, add_one=False, thickness=3, color=(0,255,0)):
     x, y, w, h = box["box"]
-    x = int(x)
+    x = int((x - rotation) % frame_width)
     y = int(y)
     w = int(w)
     h = int(h)
     cv2.rectangle(frame, (x,y), (x+w, y+h), color, thickness)
-    cv2.putText(frame, str(box["id"]), (x, y-10),  cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+    id_ = str(box["id"])
+    if add_one:
+        id_ = str(box["id"] + 1)
+    cv2.putText(frame, id_, (x, y-10),  cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
     
     
 def convert_to_xywh(bbox_array):
@@ -423,8 +432,6 @@ def reID(input_path, results, rotate_amount, progress=None):
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Total frames for progress tracking
 
     # Define the codec and create VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 'XVID' can also be used for .avi files
-    out = cv2.VideoWriter(f"results_{folder_name}.mp4", fourcc, fps, (frame_width, frame_height))
 
     id_for_box = 0
     current_boxes = []
@@ -442,13 +449,11 @@ def reID(input_path, results, rotate_amount, progress=None):
 
     while cap.isOpened():
         for i, frame in enumerate(list_of_frames):
+            print(i)
             if i == len(list_of_frames) - 1:
                 break
 
             # Read the frame from the video
-            ret, frames_cv2 = cap.read()
-            if not ret:
-                break
 
             # Update progress during each frame processing
             frames_processed += 1
@@ -456,14 +461,14 @@ def reID(input_path, results, rotate_amount, progress=None):
                 progress_percentage = initial_progress + int((frames_processed / num_frames) * progress_range)
                 progress.emit(progress_percentage)
 
-            for k, box in enumerate(current_boxes):
+            for box in current_boxes:
                 box["decay"] += 1
                 max_overlap = -1
                 index = 0
                 for j, box2 in enumerate(frame):
                     if box["box"][0] < frame_left_margin or (box["box"][0]) > frame_width * 13 / 14:
                         continue
-                    overlap = calculate_overlap(box, box2, frame_width)
+                    overlap = calculate_overlap(box, box2, frame_width, percentage=0.1)
                     if overlap > max_overlap:
                         max_overlap = overlap
                         index = j
@@ -471,20 +476,20 @@ def reID(input_path, results, rotate_amount, progress=None):
                         list_of_frames[i][j]["largestOverlap"] = max_overlap
                         list_of_frames[i][j]["decay"] = 0
 
-            for k, box in enumerate(current_boxes):
-                max_overlap = -1
-                index = 0
-                for j, box2 in enumerate(frame):
-                    if box2["id"] == -1 and (all(box["id"] != other_box["id"] for other_box in list_of_frames[i] if other_box is not box)):
-                        if box["box"][0] < frame_left_margin or (box["box"][0]) > frame_right_margin:
-                            continue
-                        overlap = calculate_overlap(box, box2, frame_width, percentage=0.1)
-                        if overlap > max_overlap:
-                            max_overlap = overlap
-                            index = j
-                            list_of_frames[i][j]["id"] = box["id"]
-                            list_of_frames[i][j]["largestOverlap"] = max_overlap
-                            list_of_frames[i][j]["decay"] = 0
+            # for k, box in enumerate(current_boxes):
+            #     max_overlap = -1
+            #     index = 0
+            #     for j, box2 in enumerate(frame):
+            #         if box2["id"] == -1 and (all(box["id"] != other_box["id"] for other_box in list_of_frames[i] if other_box is not box)):
+            #             if box["box"][0] < frame_left_margin or (box["box"][0]) > frame_right_margin:
+            #                 continue
+            #             overlap = calculate_overlap(box, box2, frame_width, percentage=0.1)
+            #             if overlap > max_overlap:
+            #                 max_overlap = overlap
+            #                 index = j
+            #                 list_of_frames[i][j]["id"] = box["id"]
+            #                 list_of_frames[i][j]["largestOverlap"] = max_overlap
+            #                 list_of_frames[i][j]["decay"] = 0
 
             for box in frame:
                 if box["id"] != -1:
@@ -507,31 +512,26 @@ def reID(input_path, results, rotate_amount, progress=None):
                             if distance < min_distance:
                                 min_distance = distance
                                 closest_box_index = idx
-                    if closest_box_index is not None and min_distance < 400 and check_for_box_jumping_to_edges(box, current_boxes[closest_box_index], frame_left_margin, frame_right_margin, frame_width):
+                    if closest_box_index is not None and min_distance < 200 and check_for_box_jumping_to_edges(box, current_boxes[closest_box_index], frame_left_margin, frame_right_margin, frame_width):
                         box["id"] = current_boxes[closest_box_index]["id"]
                         box["largestOverlap"] = 0
                         box["decay"] = 0
                         current_boxes[closest_box_index] = copy.deepcopy(box)
                     elif box["box"][0] < frame_left_margin or (box["box"][0]) > frame_right_margin:
                         continue
-                    else:
+                    elif len(current_boxes) <= num_of_people:
                         box["id"] = id_for_box
                         current_boxes.append(box)
                         id_for_box += 1
-
             current_box_frame = []
             for box in current_boxes:
                 append_box = copy.deepcopy(box)
                 append_box["id"] += 1
                 current_box_frame.append(append_box)
-                cv2.putText(frames_cv2, str(i), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
-                draw_box(frames_cv2, box)
 
             boxes_for_gaze.append(current_box_frame)
-            out.write(frames_cv2)
 
         cap.release()
-        out.release()
 
 
     dump_boxes_with_rotate = {
@@ -653,38 +653,44 @@ def initialize_plot_data(json_path, csv_path):
         return plot
     
     
-def draw_boxes_from_pkl(json_path, video_path):
-    # Load the bounding boxes from the pickle file
+def draw_boxes_from_pkl(json_path, video_path, add_one=False):
     with open(json_path, 'rb') as file:
         boxes_for_gaze = json.load(file)
 
+    rotation = boxes_for_gaze.get("rotate_amount", 0)
     boxes_for_gaze = boxes_for_gaze.get("boxes", [])
     # Open the input video
     cap = cv2.VideoCapture(video_path)
+    #remove this is you want the whole video    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 120)
     # Get video properties
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    print(frame_width)
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # You can change the codec if necessary
     # Initialize the video writer for the output video
     out = cv2.VideoWriter(f"{os.path.splitext(video_path)[0]}_annotated{os.path.splitext(video_path)[1]}", fourcc, fps, (frame_width, frame_height))
     while cap.isOpened():
         for frame_number, frame_boxes in enumerate(boxes_for_gaze):
+            print("this is progressing", frame_number)
             ret, frame = cap.read()
             if not ret:
                 break
 
     # Draw the bounding boxes for the current frame
+            cv2.putText(frame, str(frame_number), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+
             for box in frame_boxes:
-                draw_box(frame, box)
+                draw_box(frame, box, frame_width, rotation, add_one=add_one)
 
     # Write the processed frame to the output video
             out.write(frame)
+        cap.release()
+        out.release()
 
 
     # Release the video capture and writer objects
-    cap.release()
-    out.release()
     
 
     

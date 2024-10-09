@@ -1,13 +1,20 @@
 import argparse
 import os
 from GazeXR import (
-    run_detection,
     reID,
     initialize_plot_data,
     generate_graph,
+    run_detection
 )
-from video_annotator import VideoAnnotator
-
+import math
+from utils.scaleCoordinates import scale_coords
+from ultralytics import YOLO
+import numpy as np
+import matplotlib.pyplot as plt
+from utils.csvReader import read as csvRead
+import cv2
+import os
+import torch
 
 def process_video(video_path):
     # Step 1: Run detection on the video
@@ -47,8 +54,8 @@ def main():
     args = parser.parse_args()
 
     # Step 1: Process the video
-    json_path = process_video(args.video)
-
+    #json_path = process_video(args.video)
+    json_path = 'bounding_boxes_rotated_Molnar_M_Amb_Clip2_logo.json'
     input("JSON file created. Press Enter to continue processing CSV files...")
     # Step 2: Process the folder with CSV files
     process_folder(json_path, args.csv_folder)
